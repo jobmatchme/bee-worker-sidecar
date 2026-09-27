@@ -30,6 +30,7 @@ export class BeeWorkerSidecar {
 	private commandSubscription: ReturnType<NatsConnection["subscribe"]> | null = null;
 	private connectPromise: Promise<SocketEnvelopeClient> | null = null;
 	private closing = false;
+	private termination = createDeferred<Error | null>();
 
 	constructor(
 		private config: SidecarConfig,
@@ -47,7 +48,9 @@ export class BeeWorkerSidecar {
 		this.nats = await connectNats({
 			servers: this.config.nats.servers,
 			name: this.config.nats.name,
+			maxReconnectAttempts: -1,
 		});
+		void this.monitorNatsClosure(this.nats);
 		this.protocolSubscription = this.nats.subscribe(buildProtocolSubject(this.config.workerSubject));
 		this.commandSubscription = this.nats.subscribe(buildCommandSubject(this.config.workerSubject));
 
@@ -62,6 +65,10 @@ export class BeeWorkerSidecar {
 		void this.consumeCommandMessages();
 	}
 
+	waitForTermination(): Promise<Error | null> {
+		return this.termination.promise;
+	}
+
 	async close(): Promise<void> {
 		this.closing = true;
 		this.protocolSubscription?.unsubscribe();
@@ -69,9 +76,28 @@ export class BeeWorkerSidecar {
 		this.connectPromise = null;
 		this.socketClient?.close();
 		this.socketClient = null;
-		if (this.nats) {
-			await this.nats.drain();
+		try {
+			if (this.nats) {
+				await this.nats.drain();
+			}
+		} finally {
+			try {
+				await this.nats?.close();
+			} finally {
+				this.termination.resolve(null);
+			}
 		}
+	}
+
+	private async monitorNatsClosure(connection: NatsConnection): Promise<void> {
+		const error = await connection.closed();
+		if (this.closing) {
+			this.termination.resolve(null);
+			return;
+		}
+		const terminalError = error || new Error("NATS connection closed unexpectedly");
+		this.logger.error("NATS connection closed unexpectedly", String(terminalError));
+		this.termination.resolve(terminalError);
 	}
 
 	async handleProtocolMessage(message: MessageLike): Promise<void> {
@@ -228,4 +254,12 @@ export class BeeWorkerSidecar {
 
 		return client;
 	}
+}
+
+function createDeferred<T>() {
+	let resolve!: (value: T | PromiseLike<T>) => void;
+	const promise = new Promise<T>((resolvePromise) => {
+		resolve = resolvePromise;
+	});
+	return { promise, resolve };
 }

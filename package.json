@@ -8,17 +8,13 @@
 	},
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
-	"homepage": "https://github.com/jobmatchme/bee-worker-sidecar",
+	"homepage": "https://gitlab.com/jobmatchme/cf/bee-worker-sidecar",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/jobmatchme/bee-worker-sidecar.git"
+		"url": "git+https://gitlab.com/jobmatchme/cf/bee-worker-sidecar.git"
 	},
 	"bugs": {
-		"url": "https://github.com/jobmatchme/bee-worker-sidecar/issues"
-	},
-	"publishConfig": {
-		"access": "public",
-		"registry": "https://registry.npmjs.org/"
+		"url": "https://gitlab.com/jobmatchme/cf/bee-worker-sidecar/-/issues"
 	},
 	"keywords": [
 		"agents",
@@ -43,8 +39,7 @@
 		"test": "vitest run --coverage",
 		"test:watch": "vitest",
 		"check": "biome check --write --error-on-warnings . && tsgo --noEmit -p tsconfig.json && vitest run --coverage && npm run build",
-		"prepare": "husky",
-		"prepublishOnly": "npm run clean && npm run check"
+		"prepare": "husky"
 	},
 	"dependencies": {
 		"@jobmatchme/bee-dance-core": "0.1.5",

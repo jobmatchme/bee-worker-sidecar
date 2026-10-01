@@ -67,12 +67,25 @@ Example:
 
 ## Publishing
 
-The package is intended for public npm publication from GitHub Actions using npm
-Trusted Publishing via GitHub OIDC.
+GitLab is the canonical source and the only producer of new deployment
+artifacts. The public npm package stopped at version `0.1.3`; it remains
+available for compatibility, but no new npm versions are published.
+
+Every successful default-branch pipeline publishes one immutable image:
+
+```text
+registry.gitlab.com/jobmatchme/cf/bee-worker-sidecar:sha-<8-character-commit>
+```
+
+The image is built directly from the checked-out source commit. GitLab does not
+publish or promise `latest` or semantic-version image tags. Repeated pipelines
+reuse an existing SHA tag only when its
+`org.opencontainers.image.revision` label matches the full commit SHA.
 
 ## Container image
 
-A Dockerfile is included for runtime image builds. Build it locally with:
+A multi-stage Dockerfile builds the runtime directly from the source checkout.
+Build it locally with:
 
 ```bash
 docker build -t bee-worker-sidecar:local .
@@ -87,6 +100,9 @@ docker run --rm \
 ```
 
 The container entrypoint expects `BEE_WORKER_SIDECAR_CONFIG=/config/config.json`.
+
+Private GitLab Registry consumers need an image pull secret with access to
+`jobmatchme/cf/bee-worker-sidecar`.
 
 ## License
 

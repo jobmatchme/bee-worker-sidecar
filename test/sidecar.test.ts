@@ -124,10 +124,87 @@ describe("BeeWorkerSidecar", () => {
 		]);
 	});
 
+	it("surfaces an unexpected terminal NATS closure", async () => {
+		const terminalError = new Error("authorization violation");
+		const logger = {
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+		};
+		const sidecar = new BeeWorkerSidecar(
+			{
+				nats: { servers: "nats://127.0.0.1:4222" },
+				workerSubject: "bee.agent.pi.default",
+				worker: { socketPath: "/does/not/exist.sock", connectRetryMs: 1 },
+			},
+			{
+				logger,
+				connectNats: vi.fn(async () => ({
+					subscribe: vi.fn(() => ({
+						unsubscribe: vi.fn(),
+						async *[Symbol.asyncIterator]() {},
+					})),
+					drain: vi.fn(async () => undefined),
+					close: vi.fn(async () => undefined),
+					closed: vi.fn(async () => terminalError),
+				})) as never,
+			},
+		);
+
+		await sidecar.start();
+		expect(await sidecar.waitForTermination()).toBe(terminalError);
+		expect(logger.error).toHaveBeenCalledWith("NATS connection closed unexpectedly", String(terminalError));
+		await sidecar.close();
+	});
+
+	it("force-closes NATS when graceful drain fails", async () => {
+		const drainError = new Error("disconnected during drain");
+		const closeNats = vi.fn(async () => undefined);
+		const sidecar = new BeeWorkerSidecar(
+			{
+				nats: { servers: "nats://127.0.0.1:4222" },
+				workerSubject: "bee.agent.pi.default",
+				worker: { socketPath: "/does/not/exist.sock", connectRetryMs: 1 },
+			},
+			{
+				logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+				connectNats: vi.fn(async () => ({
+					subscribe: vi.fn(() => ({
+						unsubscribe: vi.fn(),
+						async *[Symbol.asyncIterator]() {},
+					})),
+					drain: vi.fn(async () => {
+						throw drainError;
+					}),
+					close: closeNats,
+					closed: vi.fn(() => new Promise<void>(() => undefined)),
+				})) as never,
+			},
+		);
+
+		await sidecar.start();
+		await expect(sidecar.close()).rejects.toBe(drainError);
+		expect(closeNats).toHaveBeenCalledOnce();
+		expect(await sidecar.waitForTermination()).toBeNull();
+	});
+
 	it("retries until the worker socket becomes available", async () => {
 		const directory = mkdtempSync(join(tmpdir(), "bee-worker-sidecar-"));
 		const socketPath = join(directory, "worker.sock");
 		cleanupPaths.push(socketPath);
+		let resolveNatsClosed!: () => void;
+		const natsClosed = new Promise<void>((resolve) => {
+			resolveNatsClosed = resolve;
+		});
+		const connectNats = vi.fn(async () => ({
+			subscribe: vi.fn(() => ({
+				unsubscribe: vi.fn(),
+				async *[Symbol.asyncIterator]() {},
+			})),
+			drain: vi.fn(async () => resolveNatsClosed()),
+			close: vi.fn(async () => resolveNatsClosed()),
+			closed: vi.fn(() => natsClosed),
+		}));
 
 		const sidecar = new BeeWorkerSidecar(
 			{
@@ -141,17 +218,16 @@ describe("BeeWorkerSidecar", () => {
 				},
 			},
 			{
-				connectNats: vi.fn(async () => ({
-					subscribe: vi.fn(() => ({
-						unsubscribe: vi.fn(),
-						async *[Symbol.asyncIterator]() {},
-					})),
-					drain: vi.fn(async () => undefined),
-				})) as never,
+				connectNats: connectNats as never,
 			},
 		);
 
 		await sidecar.start();
+		expect(connectNats).toHaveBeenCalledWith({
+			servers: ["nats://127.0.0.1:4222"],
+			name: undefined,
+			maxReconnectAttempts: -1,
+		});
 
 		const responded: unknown[] = [];
 		const messagePromise = sidecar.handleProtocolMessage({
@@ -226,6 +302,7 @@ describe("BeeWorkerSidecar", () => {
 			});
 		} finally {
 			await sidecar.close();
+			expect(await sidecar.waitForTermination()).toBeNull();
 			await new Promise<void>((resolve, reject) => {
 				server.close((error) => {
 					if (error) reject(error);

@@ -1,6 +1,7 @@
 {
 	"name": "@jobmatchme/bee-worker-sidecar",
 	"version": "0.1.3",
+	"private": true,
 	"description": "NATS to Unix socket bridge for Bee Dance speaking workers",
 	"type": "module",
 	"bin": {
@@ -39,7 +40,8 @@
 		"test": "vitest run --coverage",
 		"test:watch": "vitest",
 		"check": "biome check --write --error-on-warnings . && tsgo --noEmit -p tsconfig.json && vitest run --coverage && npm run build",
-		"prepare": "husky"
+		"prepare": "husky",
+		"prepublishOnly": "node -e \"console.error('npm publication is disabled; publish the container through GitLab CI'); process.exit(1)\""
 	},
 	"dependencies": {
 		"@jobmatchme/bee-dance-core": "0.1.5",
